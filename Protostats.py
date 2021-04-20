@@ -107,52 +107,52 @@ def find_org_in_base(org_string):  # Функция необходимая, но
     string_edited8 = string_edited.replace('акционерное общество ', '').replace('"', '')
 
     # Этот метод хуже для базы, но в разы быстрее итерации через список
-    org_query2 = "SELECT DISTINCT INN, KPP from [Cursor].[dbo].Org where OrgNm like '%" + org_string + "%' or OrgNmS like '%" + org_string + "%'"
+    org_query2 = "SELECT  INN, KPP from [Cursor].[dbo].Org where OrgNm like '%" + org_string + "%' or OrgNmS like '%" + org_string + "%' order by isnull(isZakupki,0) desc"
     df_org2 = select_query(org_query2, login_sql, pass_sql, driver_sql, server_sql)
 
     if df_org2.empty == True:  # Ищем как есть. Дальше ищем пока не нашли
-        org_query2_1 = "SELECT DISTINCT INN, KPP from [Cursor].[dbo].Org where OrgNm like '%" + string_edited + "%' or OrgNmS like '%" + string_edited + "%'"
+        org_query2_1 = "SELECT  INN, KPP from [Cursor].[dbo].Org where OrgNm like '%" + string_edited + "%' or OrgNmS like '%" + string_edited + "%' order by isnull(isZakupki,0) desc"
         df_org2 = select_query(org_query2_1, login_sql, pass_sql, driver_sql, server_sql)
 
     if df_org2.empty == True:  # Ищем по второму едиту
-        org_query3 = "SELECT DISTINCT INN, KPP from [Cursor].[dbo].Org where OrgNm like '%" + string_edited2 + "%' or OrgNmS like '%" + string_edited2 + "%'"
+        org_query3 = "SELECT  INN, KPP from [Cursor].[dbo].Org where OrgNm like '%" + string_edited2 + "%' or OrgNmS like '%" + string_edited2 + "%' order by isnull(isZakupki,0) desc"
         df_org2 = select_query(org_query3, login_sql, pass_sql, driver_sql, server_sql)
 
     if df_org2.empty == True:  # Ищем после отбрасывания орг структуры
-        org_query3 = "SELECT DISTINCT INN, KPP from [Cursor].[dbo].Org where OrgNm like '%" + string_edited3 + "%' or OrgNmS like '%" + string_edited3 + "%'"
+        org_query3 = "SELECT  INN, KPP from [Cursor].[dbo].Org where OrgNm like '%" + string_edited3 + "%' or OrgNmS like '%" + string_edited3 + "%' order by isnull(isZakupki,0) desc"
         df_org2 = select_query(org_query3, login_sql, pass_sql, driver_sql, server_sql)
 
     if df_org2.empty == True:  # Ищем по сокращенному имени, если это ИП
-        org_query4 = "SELECT DISTINCT INN, KPP from [Cursor].[dbo].Org where OrgNmSS like '%" + string_edited + "%'"
+        org_query4 = "SELECT  INN, KPP from [Cursor].[dbo].Org where OrgNmSS like '%" + string_edited + "%' order by isnull(isZakupki,0) desc"
         df_org2 = select_query(org_query4, login_sql, pass_sql, driver_sql, server_sql)
 
     if df_org2.empty == True:  # Ищем после отбрасывания орг структуры
-        org_query3 = "SELECT DISTINCT INN, KPP from [Cursor].[dbo].Org where OrgNm like '%" + string_edited3.replace(' ', '') + "%' or OrgNmS like '%" + string_edited3 + "%'"
+        org_query3 = "SELECT  INN, KPP from [Cursor].[dbo].Org where OrgNm like '%" + string_edited3.replace(' ', '') + "%' or OrgNmS like '%" + string_edited3 + "%' order by isnull(isZakupki,0) desc"
         df_org2 = select_query(org_query3, login_sql, pass_sql, driver_sql, server_sql)
 
     if df_org2.empty == True:  # Ищем после отбрасывания орг структуры и кавычек
         #print('Org:'+string_edited4+'End')
-        org_query3 = "SELECT DISTINCT INN, KPP from [Cursor].[dbo].Org where replace(orgNm,'\"','') like '%" + "'+RTRIM('"+string_edited4 + "')+'%' or OrgNmS like '%" + string_edited4 + "%'"
+        org_query3 = "SELECT  INN, KPP from [Cursor].[dbo].Org where replace(orgNm,'\"','') like '%" + "'+RTRIM('"+string_edited4 + "')+'%' or OrgNmS like '%" + string_edited4 + "%' order by isnull(isZakupki,0) desc"
         df_org2 = select_query(org_query3, login_sql, pass_sql, driver_sql, server_sql)
 
     if df_org2.empty == True:  # Ищем после отбрасывания орг структуры ОАО
-        org_query3 = "SELECT DISTINCT INN, KPP from [Cursor].[dbo].Org where replace(orgNm,'\"','') like '%" + "'+RTRIM('"+string_edited5 + "')+'%' or OrgNmS like '%" + string_edited5 + "%'"
+        org_query3 = "SELECT  INN, KPP from [Cursor].[dbo].Org where replace(orgNm,'\"','') like '%" + "'+RTRIM('"+string_edited5 + "')+'%' or OrgNmS like '%" + string_edited5 + "%' order by isnull(isZakupki,0) desc"
         df_org2 = select_query(org_query3, login_sql, pass_sql, driver_sql, server_sql)
 
     if df_org2.empty == True:  # Ищем после отбрасывания орг структуры ЗАО
-        org_query3 = "SELECT DISTINCT INN, KPP from [Cursor].[dbo].Org where replace(orgNm,'\"','') like '%" + "'+RTRIM('"+string_edited6 + "')+'%' or OrgNmS like '%" + string_edited6 + "%'"
+        org_query3 = "SELECT  INN, KPP from [Cursor].[dbo].Org where replace(orgNm,'\"','') like '%" + "'+RTRIM('"+string_edited6 + "')+'%' or OrgNmS like '%" + string_edited6 + "%' order by isnull(isZakupki,0) desc"
         df_org2 = select_query(org_query3, login_sql, pass_sql, driver_sql, server_sql)
 
     if df_org2.empty == True:  # Ищем после отбрасывания "казенное"
-        org_query3 = "SELECT DISTINCT INN, KPP from [Cursor].[dbo].Org where replace(orgNm,'\"','') like '%" + string_edited7 + "%' or OrgNmS like '%" + string_edited7 + "%'"
+        org_query3 = "SELECT  INN, KPP from [Cursor].[dbo].Org where replace(orgNm,'\"','') like '%" + string_edited7 + "%' or OrgNmS like '%" + string_edited7 + "%' order by isnull(isZakupki,0) desc"
         df_org2 = select_query(org_query3, login_sql, pass_sql, driver_sql, server_sql)
 
     if df_org2.empty == True:  # Ищем по сокращенному имени, если это ИП
-        org_query4 = "SELECT DISTINCT INN, KPP from [Cursor].[dbo].Org where OrgNmSS like '%" + string_edited.replace('ё', 'е') + "%' or OrgNmS like '%" + string_edited.replace('ё', 'е') + "%'"
+        org_query4 = "SELECT  INN, KPP from [Cursor].[dbo].Org where OrgNmSS like '%" + string_edited.replace('ё', 'е') + "%' or OrgNmS like '%" + string_edited.replace('ё', 'е') + "%' order by isnull(isZakupki,0) desc"
         df_org2 = select_query(org_query4, login_sql, pass_sql, driver_sql, server_sql)
 
     if df_org2.empty == True:  # Ищем после отбрасывания орг структуры АО
-        org_query3 = "SELECT DISTINCT INN, KPP from [Cursor].[dbo].Org where replace(orgNm,'\"','') like '%" + "'+RTRIM('"+string_edited8 + "')+'%' or OrgNmS like '%" + string_edited8 + "%'"
+        org_query3 = "SELECT  INN, KPP from [Cursor].[dbo].Org where replace(orgNm,'\"','') like '%" + "'+RTRIM('"+string_edited8 + "')+'%' or OrgNmS like '%" + string_edited8 + "%' order by isnull(isZakupki,0) desc"
         df_org2 = select_query(org_query3, login_sql, pass_sql, driver_sql, server_sql)
 
 
