@@ -105,6 +105,7 @@ def find_org_in_base(org_string):  # Функция необходимая, но
     string_edited6 = string_edited.replace('закрытое акционерное общество ', '').replace('"', '')
     string_edited7 = string_edited.replace('казенное ', '').replace('"', '')
     string_edited8 = string_edited.replace('акционерное общество ', '').replace('"', '')
+    string_edited9 = string_edited.replace(' ч.', '').replace('ч', '')
 
     # Этот метод хуже для базы, но в разы быстрее итерации через список
     org_query2 = "SELECT  INN, KPP from [Cursor].[dbo].Org where OrgNm like '%" + org_string + "%' or OrgNmS like '%" + org_string + "%' order by isnull(isZakupki,0) desc"
@@ -154,6 +155,10 @@ def find_org_in_base(org_string):  # Функция необходимая, но
     if df_org2.empty == True:  # Ищем после отбрасывания орг структуры АО
         org_query3 = "SELECT  INN, KPP from [Cursor].[dbo].Org where replace(orgNm,'\"','') like '%" + "'+RTRIM('"+string_edited8 + "')+'%' or OrgNmS like '%" + string_edited8 + "%' order by isnull(isZakupki,0) desc"
         df_org2 = select_query(org_query3, login_sql, pass_sql, driver_sql, server_sql)
+
+    if df_org2.empty == True:  # Ищем по сокращенному имени, если это ИП
+        org_query4 = "SELECT  INN, KPP from [Cursor].[dbo].Org where OrgNmSS like '%" + string_edited9.replace('ё', 'е') + "%' or OrgNmS like '%" + string_edited9.replace('ё', 'е') + "%' order by isnull(isZakupki,0) desc"
+        df_org2 = select_query(org_query4, login_sql, pass_sql, driver_sql, server_sql)
 
 
     # Дистанция Левенштейна плохо работает на 180к строках.
