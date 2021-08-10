@@ -1,5 +1,6 @@
 import time
 import random
+import re
 
 def GetRandomUserAgent ():
     with open("UserAgent.txt") as file:
@@ -18,10 +19,45 @@ def chunks(lst, n):
 args=['0108200000121000027','0111200002420001170','0112200000821000163','0123200000321000127','0126200000420005750','0126200000421000013','0126200000421000111','0126200000421000239',\
       '0136500001120007692','0139200000121000079','0142200001320024781','0142200001321000735','0142200001321001164','0163200000321000178','0165100007921000033','0167200003421000067']
 
-print(len(args))
+#print(len(args))
 
-chunks = list(chunks(args, 4))
-print(chunks)
+#chunks = list(chunks(args, 4))
+#print(chunks)
+
+
+okpd = 'ЛЕКАРСТВЕННЫЕ средства'
+a = 'Привет'
+
+
+if 'ЕКАРСТВЕН' in okpd.upper():
+    print(okpd,a)
+
+#if not re.search(r' \d+\D', okpd):
+#  print(okpd)
+
+
+
+#okpd = 'Теофиллин №234 fghf'
+#if re.search(r'^\S+ №\d+', okpd):
+#  print(okpd)
+
+
+
+#print(okpd)
+#okpd = okpd.split(str(2))[0]
+#print(okpd)
+
+
+
+
+
+#if re.search(r'^21', okpd):
+#    print('Lec')
+
+#if okpd != None and okpd != '' and okpd[0] == '"':
+#    print(okpd[0].replace('"',''))
+
+
 
 # print(random.uniform(1,1.5))
 # time.sleep(random.uniform(1,1.5))

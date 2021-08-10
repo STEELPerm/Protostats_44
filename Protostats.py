@@ -31,6 +31,8 @@ except:
     time.sleep(15)
 
 
+def isNaN(num):
+    return num != num
 
 def sql_login(sql_file='sql_login.txt'):
     try:
@@ -97,16 +99,20 @@ def find_org_in_base(org_string):  # Функция необходимая, но
     # Чистим string
     org_string = org_string.replace('»', '"').replace('«', '"').replace("'", "")
     string_edited = org_string.replace('  ', ' ').replace('- ', '-').replace(' -.', '').replace(' -', '-').replace(' - ', '-')\
-        .replace('" ', '"')
+        .replace('" ', '"').replace('""', '"').replace('“', '"').replace('”', '"')
     string_edited2 = string_edited.replace('"', '')
-    string_edited3 = string_edited.replace('общество с ограниченной ответственностью ', '')
-    string_edited4 = string_edited.replace('общество с ограниченной ответственностью ', '').replace('"', '')
+    string_edited3 = string_edited.replace('общество с ограниченной ответственностью ', '').replace('общество с огранниченной ответственностью ', '')
+    string_edited3_1 = string_edited.replace('общество с ограниченной ответственностью', '')
+    string_edited4 = string_edited.replace('общество с ограниченной ответственностью ', '').replace('общество с огранниченной ответственностью ', '').replace('"', '')
     string_edited5 = string_edited.replace('открытое акционерное общество ', '').replace('"', '')
     string_edited6 = string_edited.replace('закрытое акционерное общество ', '').replace('"', '')
     string_edited7 = string_edited.replace('казенное ', '').replace('"', '')
     string_edited8 = string_edited.replace('акционерное общество ', '').replace('"', '')
     string_edited9 = string_edited.replace(' ч.', '').replace('ч', '')
+    string_edited10 = string_edited.replace('ооо ', '').replace('ООО ', '').replace('оoo', '').replace('ooo', '').replace('ЗАО ', '').replace('зао ', '')
+    string_edited11 = string_edited.replace(' ооо', '').replace(' ООО', '')
 
+    #print('str=',string_edited, string_edited10)
     # Этот метод хуже для базы, но в разы быстрее итерации через список
     org_query2 = "SELECT  INN, KPP from [Cursor].[dbo].Org where OrgNm like '%" + org_string + "%' or OrgNmS like '%" + org_string + "%' order by isnull(isZakupki,0) desc"
     df_org2 = select_query(org_query2, login_sql, pass_sql, driver_sql, server_sql)
@@ -160,6 +166,17 @@ def find_org_in_base(org_string):  # Функция необходимая, но
         org_query4 = "SELECT  INN, KPP from [Cursor].[dbo].Org where OrgNmSS like '%" + string_edited9.replace('ё', 'е') + "%' or OrgNmS like '%" + string_edited9.replace('ё', 'е') + "%' order by isnull(isZakupki,0) desc"
         df_org2 = select_query(org_query4, login_sql, pass_sql, driver_sql, server_sql)
 
+    if df_org2.empty == True:  # Ищем после отбрасывания орг структуры
+        org_query3 = "SELECT  INN, KPP from [Cursor].[dbo].Org where OrgNm like '%" + string_edited10 + "%' or OrgNmS like '%" + string_edited10 + "%' order by isnull(isZakupki,0) desc"
+        df_org2 = select_query(org_query3, login_sql, pass_sql, driver_sql, server_sql)
+
+    if df_org2.empty == True:  # Ищем после отбрасывания орг структуры
+        org_query3 = "SELECT  INN, KPP from [Cursor].[dbo].Org where OrgNm like '%" + string_edited3_1 + "%' or OrgNmS like '%" + string_edited3_1 + "%' order by isnull(isZakupki,0) desc"
+        df_org2 = select_query(org_query3, login_sql, pass_sql, driver_sql, server_sql)
+
+    if df_org2.empty == True:  # Ищем после отбрасывания орг структуры
+        org_query3 = "SELECT  INN, KPP from [Cursor].[dbo].Org where OrgNm like '%" + string_edited11 + "%' or OrgNmS like '%" + string_edited11 + "%' order by isnull(isZakupki,0) desc"
+        df_org2 = select_query(org_query3, login_sql, pass_sql, driver_sql, server_sql)
 
     # Дистанция Левенштейна плохо работает на 180к строках.
     # if df_org2.empty == True:  # Если не нашли - ищем среди всех
@@ -233,17 +250,54 @@ def parse_and_load_data(proxy0, time_to_sleep, url0, headers0, notif_number, log
 
         if len(df) > 1:  # Если количество таблиц больше одной
             df_win = df[1]  # берем вторую таблицу, поскольку в первой - заказчик
+
             #print(df_win)
+            #print(df_win[df_win.columns[1]][0])
+            #print(len(df_win))
+
+
+
             #sys.exit()
+
             isNone = False  # Проверяем если nan первая строка
+
+
             try:
-                np.isnan(df_win[df_win.columns[0]][0])  # У них сейчас в таблицах первая строка - это nan | причина или первая строкаа - сразу поставщик
-                isNone = True
+                if np.isnan(df_win[df_win.columns[0]][0]) == True:  # У них сейчас в таблицах первая строка - это nan | причина или первая строкаа - сразу поставщик
+                    isNone = True
             except:
                 pass
 
+            #p_first = None
+            #col = 0
+            #try:
+            #    p_first = df_win[df_win.columns[0]][0]
+            #except:
+            #    pass
+
+            #if p_first is None:
+            #    isNone = True
+            #else:
+            #    col = col + 1
+
+
+
+
+            # В какой колонке находится победитель
+            k = 0
+            while k < 4:
+                if 'УЧАСТНИК(И), С КОТОРЫМИ ПЛАНИРУЕТСЯ ЗАКЛЮЧИТЬ КОНТРАКТ' in df_win.columns[k].upper() or 'НАИМЕНОВАНИЕ УЧАСТНИКА' in df_win.columns[k].upper():
+                    break
+                else:
+                    k = k + 1
+
+            #print(k, df_win[df_win.columns[0]][0], 'TEST',find_index(df_win, ['побед', 'перв', '1', 'Побед'], 1),'Len:', len(df_win), isNone, df_win[df_win.columns[k]][0],df_win)
+            #sys.exit()
+            #print('Kolonka', k)
+            winner = None
             if isNone == True:  # если первая строка первой колонны с nan
                 #df_win.to_excel('test.xlsx')  # раскомментить для тестовой выгрузки таблицы
+
                 if 'ни одной' in str(df_win[df_win.columns[1]][0]).lower() or 'отклонен' in str(df_win[df_win.columns[1]][0]).lower():  # первая строка второй колонны. Проверяем если ни одной заявки
 
                     z = str(df_win[df_win.columns[1]][0]).lower()
@@ -286,29 +340,108 @@ def parse_and_load_data(proxy0, time_to_sleep, url0, headers0, notif_number, log
                     isDouble = True
 
             elif len(df_win) > 1 and isNone == False:  # Если количество строк в таблице больше одной
+                #ind_win = find_index(df_win, ['побед', 'перв', '1'], 1)
+                ind_win = find_index(df_win, ['побед', 'перв', '1', 'Побед'], 1)
 
-                ind_win = find_index(df_win, ['побед', 'перв', '1'], 1)
+                #print (k,'TYT', df_win, ind_win, df_win.columns[k])
+                #print(df_win.columns[1])
+                #sys.exit()
+
                 if ind_win != None:
-                    winner = str(df_win[df_win.columns[0]][ind_win]).lower().replace('"', '')
-                    inn, kpp = find_org_in_base(str(df_win[df_win.columns[0]][ind_win]).lower())
-                    price = str(df_win[df_win.columns[2]][ind_win]).replace(' ', '').replace(',', '.')
-                else:
-                    winner = str(df_win[df_win.columns[0]][0]).lower().replace('"', '')
-                    inn, kpp = find_org_in_base(str(df_win[df_win.columns[0]][0]).lower())
-                    price = str(df_win[df_win.columns[2]][0]).replace(' ', '').replace(',', '.')
+                    #winner = str(df_win[df_win.columns[0]][ind_win]).lower().replace('"', '')
+                    #inn, kpp = find_org_in_base(str(df_win[df_win.columns[0]][ind_win]).lower())
+                    #price = str(df_win[df_win.columns[2]][ind_win]).replace(' ', '').replace(',', '.')
 
-                ind_sec = find_index(df_win, ['втор', '2'], 1)
-                if ind_sec != None:
-                    sec_winner = str(df_win[df_win.columns[0]][ind_sec]).lower().replace('"', '')
-                    inn2, kpp2 = find_org_in_base(str(df_win[df_win.columns[0]][ind_sec]).lower().lower())
-                    sec_price = str(df_win[df_win.columns[2]][ind_sec]).replace(' ', '').replace(',', '.')
+                    winner = str(df_win[df_win.columns[k]][ind_win]).lower().replace('"', '')
+                    inn, kpp = find_org_in_base(str(df_win[df_win.columns[k]][ind_win]).lower())
+                    price = str(df_win[df_win.columns[2+k]][ind_win]).replace(' ', '').replace(',', '.')
                 else:
-                    sec_winner = str(df_win[df_win.columns[0]][1]).lower().replace('"', '')
-                    inn2, kpp2 = find_org_in_base(str(df_win[df_win.columns[0]][1]).lower().lower())
-                    sec_price = str(df_win[df_win.columns[2]][1]).replace(' ', '').replace(',', '.')
+                    #winner = str(df_win[df_win.columns[0]][0]).lower().replace('"', '')
+                    #inn, kpp = find_org_in_base(str(df_win[df_win.columns[0]][0]).lower())
+                    #price = str(df_win[df_win.columns[2]][0]).replace(' ', '').replace(',', '.')
+
+                    winner = str(df_win[df_win.columns[k]][0]).lower().replace('"', '')
+                    inn, kpp = find_org_in_base(str(df_win[df_win.columns[k]][0]).lower())
+                    price = str(df_win[df_win.columns[2+k]][0]).replace(' ', '').replace(',', '.')
+
+                #ind_sec = find_index(df_win, ['втор', '2'], 1)
+
+                #ind_sec = find_index(df_win, ['втор', '2'], 1+col)
+                ind_sec = find_index(df_win, ['втор', '2'], 1+k)
+                if ind_sec != None:
+                    #sec_winner = str(df_win[df_win.columns[0]][ind_sec]).lower().replace('"', '')
+                    #inn2, kpp2 = find_org_in_base(str(df_win[df_win.columns[0]][ind_sec]).lower().lower())
+                    #sec_price = str(df_win[df_win.columns[2]][ind_sec]).replace(' ', '').replace(',', '.')
+
+                    sec_winner = str(df_win[df_win.columns[k]][ind_sec]).lower().replace('"', '')
+                    inn2, kpp2 = find_org_in_base(str(df_win[df_win.columns[k]][ind_sec]).lower().lower())
+                    sec_price = str(df_win[df_win.columns[2+k]][ind_sec]).replace(' ', '').replace(',', '.')
+                else:
+                    #sec_winner = str(df_win[df_win.columns[0]][1]).lower().replace('"', '')
+                    #inn2, kpp2 = find_org_in_base(str(df_win[df_win.columns[0]][1]).lower().lower())
+                    #sec_price = str(df_win[df_win.columns[2]][1]).replace(' ', '').replace(',', '.')
+
+                    try:
+                        sec_winner = str(df_win[df_win.columns[k]][1]).lower().replace('"', '')
+                        inn2, kpp2 = find_org_in_base(str(df_win[df_win.columns[k]][1]).lower().lower())
+                        sec_price = str(df_win[df_win.columns[2+k]][1]).replace(' ', '').replace(',', '.')
+                    except:
+                        pass
 
                 main_stat = 'ОПРЕДЕЛЕНИЕ ПОСТАВЩИКА ЗАВЕРШЕНО'
                 isDouble = True
+
+            #STEEL от 31.05.2021 добавил блок, если len(df_win) == 1
+            elif len(df_win) == 1 and isNone == False:  # Если количество строк в таблице больше одной
+                #ind_win = find_index(df_win, ['побед', 'перв', '1'], 1)
+                ind_win = find_index(df_win, ['побед', 'перв', '1', 'Побед'], 1)
+
+                #print (k,'TYT1', df_win, ind_win, df_win.columns[k])
+                #print(df_win.columns[1])
+                #sys.exit()
+
+                if ind_win != None:
+                    winner = str(df_win[df_win.columns[k]][ind_win]).lower().replace('"', '')
+                    inn, kpp = find_org_in_base(str(df_win[df_win.columns[k]][ind_win]).lower())
+                    price = str(df_win[df_win.columns[2+k]][ind_win]).replace(' ', '').replace(',', '.')
+                else:
+                    winner = str(df_win[df_win.columns[k]][0]).lower().replace('"', '')
+                    inn, kpp = find_org_in_base(str(df_win[df_win.columns[k]][0]).lower())
+                    price = str(df_win[df_win.columns[2+k]][0]).replace(' ', '').replace(',', '.')
+
+                main_stat = 'ОПРЕДЕЛЕНИЕ ПОСТАВЩИКА ЗАВЕРШЕНО'
+                prot_num = 1  # проставляем номер
+
+            if winner == None:
+                m = 0
+                p_number = 0
+                win_id = 0
+                while m < len(df_win):
+                    if p_number == 0 and isNaN(df_win[df_win.columns[k]][m]) == False:
+                        winner = df_win[df_win.columns[k]][m]
+                        inn, kpp = find_org_in_base(str(df_win[df_win.columns[k]][m]).lower())
+                        price = str(df_win[df_win.columns[2 + k]][m]).replace(' ', '').replace(',', '.')
+                        p_number = 1
+                        win_id = m
+                    if p_number == 1 and win_id < m and isNaN(df_win[df_win.columns[k]][m]) == False:
+                        sec_winner = df_win[df_win.columns[k]][m]
+                        inn2, kpp2 = find_org_in_base(str(df_win[df_win.columns[k]][m]).lower())
+                        sec_price = str(df_win[df_win.columns[2 + k]][m]).replace(' ', '').replace(',', '.')
+                        p_number = 2
+                    m = m + 1
+
+                if p_number == 2:
+                    isDouble = True
+
+                if p_number == 1:
+                    main_stat = 'ОПРЕДЕЛЕНИЕ ПОСТАВЩИКА ЗАВЕРШЕНО'
+                    prot_num = 1  # проставляем номер
+
+            #print('pobed',winner)
+            #print(inn, kpp)
+            #print('Price: ',price)
+            #print(len(df_win))
+
 
         elif len(df) == 1:  # Если одна таблица в документе
             df0 = df[0]
@@ -325,11 +458,28 @@ def parse_and_load_data(proxy0, time_to_sleep, url0, headers0, notif_number, log
         #STEEL от 12.01.2021 Исправил ошибку Error converting data type nvarchar to numeric
         if price != None:
             price = price.replace(' ', '')
+            #STEEL от 11.06.2021 добавил условия: 2 фразы и пусто в цене, тогда цена победителя равна НМЦ лота.
+            #print (k,price)
+            #sys.exit()
+            if price == 'nan':
+                if '1 - Победитель' in df_win[df_win.columns[k+1]][0]\
+                    or (('олько одна заявка' in df_win[df_win.columns[k+1]][0] or 'олько одного участника' in df_win[df_win.columns[k+1]][0])\
+                    and ('несостоявш' in df_win[df_win.columns[k+1]][0] or 'признана соответствующей' in df_win[df_win.columns[k+1]][0])):
+                    query_price = "select top 1 isnull(TenderPrice,0) from Tender (nolock) where notifnr='"+notif_number+"'"
+                    price_rez = select_query(query_price, login_sql, pass_sql, driver_sql, server_sql, 'Cursor', True)
+                    if price_rez != None:
+                       price = price_rez[0]
+                    else:
+                        price = 0
+
+        if sec_price == 'nan':
+            sec_price = None
+
         if sec_price != None:
             sec_price = sec_price.replace(' ', '')
 
         #STEEL от 26.02.2021 Если нет победителя и статус "определение поставщика завершено", то значит: статус "Не сост", а причина "Не подано ни одной заявки".
-        if len(df_win) == 0:
+        if len(df_win) == 0 and winner == None:
             parsed_html = BeautifulSoup(r.text, features="html.parser")
             status = parsed_html.findAll("span", {"class": 'cardMainInfo__state distancedText'})[0].text
             if 'определение поставщика завершено' in status.lower():
@@ -346,8 +496,10 @@ def parse_and_load_data(proxy0, time_to_sleep, url0, headers0, notif_number, log
         print(inn2)
         print(sec_price)
 
+        #sys.exit()
+
     except:
-        #traceback.print_exc()  # Раскомментить для вывода ошибок
+        traceback.print_exc()  # Раскомментить для вывода ошибок
         print('Нет таблиц в документе')
         # Находим статус заявки по классу, если таблиц нет
         parsed_html = BeautifulSoup(r.text, features="html.parser")
@@ -370,6 +522,9 @@ def parse_and_load_data(proxy0, time_to_sleep, url0, headers0, notif_number, log
         else:
             z = 'НЕИЗВЕСТНАЯ ОШИБКА'
             main_stat = z
+
+    #print(notif_number, prot_num, winner, sec_winner, z, price, main_stat, inn, kpp)
+    #sys.exit()
 
     #Загрузка на импорт
     try:
