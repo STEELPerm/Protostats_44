@@ -13,9 +13,12 @@ import numpy as np
 from bs4 import BeautifulSoup
 import urllib3
 from multiprocessing.dummy import Pool as ThreadPool
-from fuzzywuzzy import fuzz
+#from fuzzywuzzy import fuzz
 import random
 import sys
+import re
+
+import Org_creator
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 # Скрытые модули: lxml, html5lib, webencodings
@@ -60,8 +63,90 @@ def sql_server(sql_server_file='sql_server.txt'):
         sys.exit()
     return driver_sql, server_sql, NeedProxy
 
+def getSupINN_KPP (url, headers):
+    # Сначала получить ссылку из https://zakupki.gov.ru/epz/order/notice/rpec/search-results.html?orderNum=0372100003422000804
+    # <a href="/epz/order/notice/rpec/common-info.html?regNumber=03721000034220008040001" target="_blank">Сведения процедуры заключения контракта</a>
+    r_link = requests.post(url, headers=headers, verify=False, proxies='', timeout=30)
+    parsed_html_link = BeautifulSoup(r_link.text, features="html.parser")
+    next_url = parsed_html_link.find("a")
+
+    # Если ссылки нет, значит "Сведения о процедуре заключения контракта отсутствуют"
+    if next_url:
+        next_url = next_url.get('href')
+        url = 'https://zakupki.gov.ru' + next_url
+        print(next_url, url)
+    else:
+        print(url, "Сведения о процедуре заключения контракта отсутствуют")
+        return None, None
 
 
+    html = requests.get(url, headers=headers)
+
+    #STEEL от 24.11.2022 Бывает, что ссылка заканчивается на 0002 вместо 0001
+    # if html.status_code != 200:
+    #     print(html.status_code, 'getSupINN_KPP RE_GET')
+    #     a = url.index(url[len(url) - 1])
+    #     url_end = url[a]
+    #
+    #     if url_end == '1':
+    #         url = url.replace(url[a], '2')
+    #         print('getSupINN_KPP new url:', url)
+    #         html = requests.get(url, headers=headers)
+    #         print(html.status_code, 'getSupINN_KPP RE_GET+')
+    #########################################################################
+
+    soup = BeautifulSoup(html.text, 'html.parser')
+    items = soup.find_all('span')
+    index = -1
+    inn_out = None
+    kpp_out = None
+
+    # STEEL от 19.08.2022 определение через Вид поставщика 1 - Юридическое лицо, 2 - Физическое лицо
+    type_sup = 1
+
+
+    for item in items:
+        # Вид: Юридическое лицо
+        if 'Полное наименование поставщика' in item:
+            index = items.index(item)
+            type_sup = 1
+            break
+
+        # Вид: Физическое лицо
+        if 'Фамилия, имя, отчество' in item:
+            index = items.index(item)
+            type_sup = 2
+            break
+
+
+    if type_sup == 1:
+        items = items[index + 2:]
+    elif type_sup == 2:
+        # items = items[index + 4:]
+
+        # STEEL от 25.10.2022 Бывает, что у ИП не пишут: Является индивидуальным предпринимателем: Да
+        sp = 2
+        for item in items:
+            if 'Является индивидуальным предпринимателем' in item:
+                sp = 4
+                break
+
+        items = items[index + sp:]
+
+    index = -1
+
+    for item in items:
+        if 'ИНН' in item:
+            index_inn = items.index(item) + 1
+            inn_out = items[index_inn].get_text(strip=True)
+
+        if 'КПП' in item:
+            index_kpp = items.index(item) + 1
+            kpp_out = items[index_kpp].get_text(strip=True)
+
+
+    return inn_out, kpp_out
+    #return items[index_inn].get_text(strip=True), items[index_kpp].get_text(strip=True)
 
 def chunks(lst, n):
     for i in range(0, len(lst), n):
@@ -230,6 +315,7 @@ def parse_and_load_data(proxy0, time_to_sleep, url0, headers0, notif_number, log
     kpp = None  # кпп победителя
     inn2 = None
     kpp2 = None
+    ident = 0
 
     time.sleep(time_to_sleep)
 
@@ -239,24 +325,49 @@ def parse_and_load_data(proxy0, time_to_sleep, url0, headers0, notif_number, log
         #print('Подключаюсь без прокси')
 
 
-    #print(proxy0)
+    #print(proxy0)proxy0
     try:
         r = requests.post(url0, headers=headers0, verify=False, proxies=proxy0,
-                      timeout=10)  # Пробуем подключиться
+                      timeout=30)  # Пробуем подключиться
     except:
         print('Ошибка')
     try:
-        df = pd.read_html(r.text, header=0)  # Берем таблицы из html
+
+        #Если есть на странице "Основание признания торгов несостоявшимися", сразу ставим "По окончании срока подачи заявок не подано ни одной заявки"
+        # Не надо такое:  Победитель есть, поскольку единственный участник соответствует требованиям
+
+        # parsed_html = BeautifulSoup(r.text, features="html.parser")
+        # html_title = parsed_html.findAll("span", {"class": 'section__title'})
+        #
+        # i_title = 0
+        # while i_title < len(html_title):
+        #     if html_title[i_title].text == 'Основание признания торгов несостоявшимися':
+        #         z = 'По окончании срока подачи заявок не подано ни одной заявки'
+        #         main_stat = z
+        #         break
+        #     i_title += 1
+        #
+        # if z == None:
+
+        #STEEL от 10.11.2022 добавил для разделителя . (decimal=',', thousands='.'), чтобы корректно загружал 0.1364, 0.11 и т.п. если на сайте указано 0,1364, 0,11
+        df = pd.read_html(r.text, decimal=',', thousands='.', header=0)  # Берем таблицы из html
 
         if len(df) > 1:  # Если количество таблиц больше одной
             df_win = df[1]  # берем вторую таблицу, поскольку в первой - заказчик
 
             #print(df_win)
-            #print(df_win[df_win.columns[1]][0])
-            #print(len(df_win))
-
-
-
+            # print(df_win[df_win.columns[1]][0])
+            # print(df_win[df_win.columns[0]][0])
+            # print(np.isnan(df_win[df_win.columns[0]][0]))
+            # print(len(df_win))
+            # print(find_index(df_win, ['побед', 'перв', '1', 'Побед'], 1))
+            # print('END')
+            # print(find_index(df_win, ['втор', '2'], 1))
+            #
+            # print(str(df_win[df_win.columns[2]][1]).replace(' ', '').replace(',','.'))
+            # print (str(df_win[df_win.columns[2]][0]).replace(' ', '').replace(',','.'))
+            #
+            #
             #sys.exit()
 
             isNone = False  # Проверяем если nan первая строка
@@ -285,15 +396,20 @@ def parse_and_load_data(proxy0, time_to_sleep, url0, headers0, notif_number, log
 
             # В какой колонке находится победитель
             k = 0
+
             while k < 4:
                 if 'УЧАСТНИК(И), С КОТОРЫМИ ПЛАНИРУЕТСЯ ЗАКЛЮЧИТЬ КОНТРАКТ' in df_win.columns[k].upper() or 'НАИМЕНОВАНИЕ УЧАСТНИКА' in df_win.columns[k].upper():
+                    break
+                if 'ИДЕНТИФИКАЦИОННЫЕ НОМЕРА УЧАСТНИКОВ, С КОТОРЫМИ ПЛАНИРУЕТСЯ ЗАКЛЮЧИТЬ КОНТРАКТ' in df_win.columns[k].upper():
+                    ident = 1
                     break
                 else:
                     k = k + 1
 
-            #print(k, df_win[df_win.columns[0]][0], 'TEST',find_index(df_win, ['побед', 'перв', '1', 'Побед'], 1),'Len:', len(df_win), isNone, df_win[df_win.columns[k]][0],df_win)
+            #print(df_win[df_win.columns[2]][0],k, df_win[df_win.columns[0]][0], 'TEST',find_index(df_win, ['побед', 'перв', '1', 'Побед'], 1),'Len:', len(df_win), isNone, df_win[df_win.columns[k]][0],df_win)
             #sys.exit()
-            #print('Kolonka', k)
+
+            print('ident ', ident)
             winner = None
             if isNone == True:  # если первая строка первой колонны с nan
                 #df_win.to_excel('test.xlsx')  # раскомментить для тестовой выгрузки таблицы
@@ -308,44 +424,77 @@ def parse_and_load_data(proxy0, time_to_sleep, url0, headers0, notif_number, log
                     df_win[df_win.columns[1]][0]).lower() or 'только одной второй части заявки на участие в нем' in str(
                     df_win[df_win.columns[1]][0]).lower():  # Проверяем если только одна заявка
 
-                    winner = str(df_win[df_win.columns[0]][1]).lower().replace('"', '')  # берем победителя из первой колонны,второй строки
-                    inn, kpp = find_org_in_base(str(df_win[df_win.columns[0]][1]).lower())  # находим орг в базе
-                    price = str(df_win[df_win.columns[2]][1]).replace(' ', '').replace(',', '.')  # берем цену победителя из 3 колонны, второй строки
+                    if df_win[df_win.columns[k]][0] == 'NaN' or df_win[df_win.columns[k]][0] == 'nan' or np.isnan(df_win[df_win.columns[k]][0]) == True:
+                        winner = '1'
+                        ident = 1
+                    else:
+                        winner = str(df_win[df_win.columns[0]][1]).lower().replace('"', '')  # берем победителя из первой колонны,второй строки
+                    if ident == 0:
+                        inn, kpp = find_org_in_base(str(df_win[df_win.columns[0]][1]).lower())  # находим орг в базе
+                    try:
+                        price = str(df_win[df_win.columns[2]][1]).replace(' ', '').replace(',', '.')  # берем цену победителя из 3 колонны, второй строки
+                    except:
+                        price = str(df_win[df_win.columns[2]][0]).replace(' ', '').replace(',','.')  # берем цену победителя из 3 колонны, второй строки
                     main_stat = 'ОПРЕДЕЛЕНИЕ ПОСТАВЩИКА ЗАВЕРШЕНО'  # проставляем,что нашли победителя
                     prot_num = 1  # проставляем номер
 
-                elif 'двух и более' in str(df_win[df_win.columns[1]][0]).lower():
-
+                elif 'двух и более' in str(df_win[df_win.columns[1]][0]).lower(): #or len(df_win) > 1:
                     ind_win = find_index(df_win, ['побед', 'перв', '1'], 1)  # находим строку, в которой находится победитель
                     if ind_win != None:  # если нашли, то берем из этой строки
                         winner = str(df_win[df_win.columns[0]][ind_win]).lower().replace('"', '')
-                        inn, kpp = find_org_in_base(str(df_win[df_win.columns[0]][ind_win]).lower())
+                        if ident == 0:
+                            inn, kpp = find_org_in_base(str(df_win[df_win.columns[0]][ind_win]).lower())
                         price = str(df_win[df_win.columns[2]][ind_win]).replace(' ', '').replace(',', '.')
                     else:  # если не нашли, то берем первую строку
                         winner = str(df_win[df_win.columns[0]][0]).lower().replace('"', '')
-                        inn, kpp = find_org_in_base(str(df_win[df_win.columns[0]][0]).lower())
+                        if ident == 0:
+                            inn, kpp = find_org_in_base(str(df_win[df_win.columns[0]][0]).lower())
                         price = str(df_win[df_win.columns[2]][0]).replace(' ', '').replace(',', '.')
 
                     ind_sec = find_index(df_win, ['втор', '2'], 1)  # находим строку,в которой находится второй участник
                     if ind_sec != None:
                         sec_winner = str(df_win[df_win.columns[0]][ind_sec]).lower().replace('"', '')
-                        inn2, kpp2 = find_org_in_base(str(df_win[df_win.columns[0]][ind_sec]).lower().lower())
+                        if ident == 0:
+                            inn2, kpp2 = find_org_in_base(str(df_win[df_win.columns[0]][ind_sec]).lower().lower())
                         sec_price = str(df_win[df_win.columns[2]][ind_sec]).replace(' ', '').replace(',', '.')
                     else:
                         sec_winner = str(df_win[df_win.columns[0]][1]).lower().replace('"', '')
-                        inn2, kpp2 = find_org_in_base(str(df_win[df_win.columns[0]][1]).lower().lower())
+                        if ident == 0:
+                            inn2, kpp2 = find_org_in_base(str(df_win[df_win.columns[0]][1]).lower().lower())
                         sec_price = str(df_win[df_win.columns[2]][1]).replace(' ', '').replace(',', '.')
 
                     main_stat = 'ОПРЕДЕЛЕНИЕ ПОСТАВЩИКА ЗАВЕРШЕНО'
                     isDouble = True
 
+                # Если не указано наименование победителя и нет идент. номера в первой колонке (Nan)
+                if 'обедитель' in str(df_win[df_win.columns[1]][0]).lower():  # Проверяем есть ли победитель
+                    winner = '1'
+                    ident = 1
+
+                    price = str(df_win[df_win.columns[2]][0]).replace(' ', '').replace(',','.')  # берем цену победителя из 3 колонны, второй строки
+
+                    main_stat = 'ОПРЕДЕЛЕНИЕ ПОСТАВЩИКА ЗАВЕРШЕНО'  # проставляем,что нашли победителя
+                    prot_num = 1  # проставляем номер
+
+                try:
+                    if 'торой номер' in str(df_win[df_win.columns[1]][1]).lower():  # Проверяем есть ли 2й участник
+                        sec_winner = '2'
+                        ident = 1
+
+                        sec_price = str(df_win[df_win.columns[2]][1]).replace(' ', '').replace(',','.')  # берем цену победителя из 3 колонны, второй строки
+
+                        main_stat = 'ОПРЕДЕЛЕНИЕ ПОСТАВЩИКА ЗАВЕРШЕНО'  # проставляем,что нашли победителя
+                        isDouble = True
+                except:
+                    pass
+
             elif len(df_win) > 1 and isNone == False:  # Если количество строк в таблице больше одной
                 #ind_win = find_index(df_win, ['побед', 'перв', '1'], 1)
                 ind_win = find_index(df_win, ['побед', 'перв', '1', 'Побед'], 1)
 
-                #print (k,'TYT', df_win, ind_win, df_win.columns[k])
-                #print(df_win.columns[1])
-                #sys.exit()
+                # print (k,'TYT', df_win, ind_win, df_win.columns[k])
+                # print(df_win.columns[1])
+                # sys.exit()
 
                 if ind_win != None:
                     #winner = str(df_win[df_win.columns[0]][ind_win]).lower().replace('"', '')
@@ -353,7 +502,8 @@ def parse_and_load_data(proxy0, time_to_sleep, url0, headers0, notif_number, log
                     #price = str(df_win[df_win.columns[2]][ind_win]).replace(' ', '').replace(',', '.')
 
                     winner = str(df_win[df_win.columns[k]][ind_win]).lower().replace('"', '')
-                    inn, kpp = find_org_in_base(str(df_win[df_win.columns[k]][ind_win]).lower())
+                    if ident == 0:
+                        inn, kpp = find_org_in_base(str(df_win[df_win.columns[k]][ind_win]).lower())
                     price = str(df_win[df_win.columns[2+k]][ind_win]).replace(' ', '').replace(',', '.')
                 else:
                     #winner = str(df_win[df_win.columns[0]][0]).lower().replace('"', '')
@@ -361,7 +511,8 @@ def parse_and_load_data(proxy0, time_to_sleep, url0, headers0, notif_number, log
                     #price = str(df_win[df_win.columns[2]][0]).replace(' ', '').replace(',', '.')
 
                     winner = str(df_win[df_win.columns[k]][0]).lower().replace('"', '')
-                    inn, kpp = find_org_in_base(str(df_win[df_win.columns[k]][0]).lower())
+                    if ident == 0:
+                        inn, kpp = find_org_in_base(str(df_win[df_win.columns[k]][0]).lower())
                     price = str(df_win[df_win.columns[2+k]][0]).replace(' ', '').replace(',', '.')
 
                 #ind_sec = find_index(df_win, ['втор', '2'], 1)
@@ -374,7 +525,8 @@ def parse_and_load_data(proxy0, time_to_sleep, url0, headers0, notif_number, log
                     #sec_price = str(df_win[df_win.columns[2]][ind_sec]).replace(' ', '').replace(',', '.')
 
                     sec_winner = str(df_win[df_win.columns[k]][ind_sec]).lower().replace('"', '')
-                    inn2, kpp2 = find_org_in_base(str(df_win[df_win.columns[k]][ind_sec]).lower().lower())
+                    if ident == 0:
+                        inn2, kpp2 = find_org_in_base(str(df_win[df_win.columns[k]][ind_sec]).lower().lower())
                     sec_price = str(df_win[df_win.columns[2+k]][ind_sec]).replace(' ', '').replace(',', '.')
                 else:
                     #sec_winner = str(df_win[df_win.columns[0]][1]).lower().replace('"', '')
@@ -383,7 +535,8 @@ def parse_and_load_data(proxy0, time_to_sleep, url0, headers0, notif_number, log
 
                     try:
                         sec_winner = str(df_win[df_win.columns[k]][1]).lower().replace('"', '')
-                        inn2, kpp2 = find_org_in_base(str(df_win[df_win.columns[k]][1]).lower().lower())
+                        if ident == 0:
+                            inn2, kpp2 = find_org_in_base(str(df_win[df_win.columns[k]][1]).lower().lower())
                         sec_price = str(df_win[df_win.columns[2+k]][1]).replace(' ', '').replace(',', '.')
                     except:
                         pass
@@ -391,22 +544,24 @@ def parse_and_load_data(proxy0, time_to_sleep, url0, headers0, notif_number, log
                 main_stat = 'ОПРЕДЕЛЕНИЕ ПОСТАВЩИКА ЗАВЕРШЕНО'
                 isDouble = True
 
-            #STEEL от 31.05.2021 добавил блок, если len(df_win) == 1
+            # STEEL от 31.05.2021 добавил блок, если len(df_win) == 1
             elif len(df_win) == 1 and isNone == False:  # Если количество строк в таблице больше одной
                 #ind_win = find_index(df_win, ['побед', 'перв', '1'], 1)
                 ind_win = find_index(df_win, ['побед', 'перв', '1', 'Побед'], 1)
 
-                #print (k,'TYT1', df_win, ind_win, df_win.columns[k])
-                #print(df_win.columns[1])
-                #sys.exit()
+                # print (k,'TYT1', df_win, ind_win, df_win.columns[k])
+                # print(df_win.columns[1])
+                # sys.exit()
 
                 if ind_win != None:
                     winner = str(df_win[df_win.columns[k]][ind_win]).lower().replace('"', '')
-                    inn, kpp = find_org_in_base(str(df_win[df_win.columns[k]][ind_win]).lower())
+                    if ident == 0:
+                        inn, kpp = find_org_in_base(str(df_win[df_win.columns[k]][ind_win]).lower())
                     price = str(df_win[df_win.columns[2+k]][ind_win]).replace(' ', '').replace(',', '.')
                 else:
                     winner = str(df_win[df_win.columns[k]][0]).lower().replace('"', '')
-                    inn, kpp = find_org_in_base(str(df_win[df_win.columns[k]][0]).lower())
+                    if ident == 0:
+                        inn, kpp = find_org_in_base(str(df_win[df_win.columns[k]][0]).lower())
                     price = str(df_win[df_win.columns[2+k]][0]).replace(' ', '').replace(',', '.')
 
                 main_stat = 'ОПРЕДЕЛЕНИЕ ПОСТАВЩИКА ЗАВЕРШЕНО'
@@ -419,13 +574,15 @@ def parse_and_load_data(proxy0, time_to_sleep, url0, headers0, notif_number, log
                 while m < len(df_win):
                     if p_number == 0 and isNaN(df_win[df_win.columns[k]][m]) == False:
                         winner = df_win[df_win.columns[k]][m]
-                        inn, kpp = find_org_in_base(str(df_win[df_win.columns[k]][m]).lower())
+                        if ident == 0:
+                            inn, kpp = find_org_in_base(str(df_win[df_win.columns[k]][m]).lower())
                         price = str(df_win[df_win.columns[2 + k]][m]).replace(' ', '').replace(',', '.')
                         p_number = 1
                         win_id = m
                     if p_number == 1 and win_id < m and isNaN(df_win[df_win.columns[k]][m]) == False:
                         sec_winner = df_win[df_win.columns[k]][m]
-                        inn2, kpp2 = find_org_in_base(str(df_win[df_win.columns[k]][m]).lower())
+                        if ident == 0:
+                            inn2, kpp2 = find_org_in_base(str(df_win[df_win.columns[k]][m]).lower())
                         sec_price = str(df_win[df_win.columns[2 + k]][m]).replace(' ', '').replace(',', '.')
                         p_number = 2
                     m = m + 1
@@ -443,7 +600,11 @@ def parse_and_load_data(proxy0, time_to_sleep, url0, headers0, notif_number, log
             #print(len(df_win))
 
 
-        elif len(df) == 1:  # Если одна таблица в документе
+        elif len(df) == 1 and 'ЗАКАЗЧИК(И), С КОТОРЫМИ ПЛАНИРУЕТСЯ ЗАКЛЮЧИТЬ КОНТРАКТ' not in df[0].columns[0].upper() :  # Если одна таблица в документе
+            # print(df[0][df[0].columns[0]][0] )
+            # print(df[0].columns[0])
+            # print(df[0])
+            # sys.exit()
             df0 = df[0]
             info0 = df0[df0.columns[0]][0]  # берем ячейку, в которой статус
             print(info0.lower())
@@ -479,18 +640,134 @@ def parse_and_load_data(proxy0, time_to_sleep, url0, headers0, notif_number, log
             sec_price = sec_price.replace(' ', '')
 
         #STEEL от 26.02.2021 Если нет победителя и статус "определение поставщика завершено", то значит: статус "Не сост", а причина "Не подано ни одной заявки".
-        if len(df_win) == 0 and winner == None:
+        #if len(df_win) == 0 and winner == None:
+        # print(len(df) , df[0].columns[0].upper() , winner, df)
+        # sys.exit()
+
+        if len(df) >= 1 and 'ЗАКАЗЧИК(И), С КОТОРЫМИ ПЛАНИРУЕТСЯ ЗАКЛЮЧИТЬ КОНТРАКТ' in df[0].columns[0].upper() and winner == None:
             parsed_html = BeautifulSoup(r.text, features="html.parser")
             status = parsed_html.findAll("span", {"class": 'cardMainInfo__state distancedText'})[0].text
             if 'определение поставщика завершено' in status.lower():
                 z = 'По окончании срока подачи заявок не подано ни одной заявки'
                 main_stat = z
 
+        # Получение ИНН КПП из блока  "Информация о процедуре заключения контракта" - "Информация о поставщике"
+        #url_sup = 'https://zakupki.gov.ru/epz/order/notice/rpec/common-info.html?regNumber=' + str(notif_number) + '0001'
+        # STEEL от 28.11.2022 переделал на получение ссылки
+        url_sup = 'https://zakupki.gov.ru/epz/order/notice/rpec/search-results.html?orderNum=' + str(notif_number)
+
+        inn_sup, kpp_sup = getSupINN_KPP(url_sup, headers0)
+
+        # try:
+        #     inn_sup, kpp_sup = getSupINN_KPP(url_sup, headers0)
+        # except:
+        #     inn_sup, kpp_sup = None, None
+
+        if inn_sup != None:
+            inn = inn_sup
+            kpp = kpp_sup
+
+        if inn != None:
+            # Если нет орагнизации, то пытаемся загрузить новый орг в базу через Dadata
+            org_cust_query = "SELECT Org_ID from [Cursor].[dbo].[Org] (nolock) where INN = '" + str(inn) + "' and KPP = '" + str(kpp) + "'"
+            org_cust = select_query(org_cust_query, login_sql, pass_sql, driver_sql, server_sql)
+
+            if org_cust.empty == True:
+                org_cust_query = "SELECT Org_ID from [Cursor].[dbo].[Org] (nolock) where INN = '" + str(inn) + "'"
+                org_cust = select_query(org_cust_query, login_sql, pass_sql, driver_sql, server_sql)
+                if org_cust.empty == True:
+                    print('В базе нет организации с ИНН: ' + str(inn) + ', КПП: ' + str(kpp))
+                    resp1 = Org_creator.create(inn, login_sql, pass_sql)  # добавляем в базу с помощью функции
+                    print(resp1)
+
+        # STEEL от 17.11.2022 Цена победителя по новому алгоритму от Екатерины
+        """
+        Вычисляем цену победителя по новому алгоритму, если сработает условие по Цене: 
+        разделить полученную цену победителя на НМЦ, и полученный результат не входит в рамки от 0,1 до 1
+        
+        Новый алгоритм:
+        1	Поиск по номеру изв	"Если на странице РЕЗУЛЬТАТЫ ОПРЕДЕЛЕНИЯ ПОСТАВЩИКА (ПОДРЯДЧИКА, ИСПОЛНИТЕЛЯ) в разделе 
+        Участники, с которыми планируется заключить  контракт стоит только одно значение и оно равно значению 
+        на странице ОБЩАЯ ИНФОРМАЦИЯ в разделе Начальная сумма цен единиц товара, работы, услуги, 
+        то в Цене побед ставим НМЦ торгов"        
+        от 25.11.2022:
+        Если значение одно и оно не равно значению на странице ОБЩАЯ ИНФОРМАЦИЯ в разделе Начальная сумма цен единиц товара, работы, услуги, 
+        то включаем алгоритм: НМЦ/значению на странице ОБЩАЯ ИНФОРМАЦИЯ в разделе Начальная сумма цен единиц товара, работы, услуги*значение на стр 
+        РЕЗУЛЬТАТЫ ОПРЕДЕЛЕНИЯ ПОСТАВЩИКА (ПОДРЯДЧИКА, ИСПОЛНИТЕЛЯ) в разделе Участники, с которыми планируется заключить контракт
+
+
+        2	Поиск по номеру изв	Если на странице РЕЗУЛЬТАТЫ ОПРЕДЕЛЕНИЯ ПОСТАВЩИКА (ПОДРЯДЧИКА, ИСПОЛНИТЕЛЯ) в разделе 
+        Участники, с которыми планируется заключить контракт стоит несколько значений - идем  на страницу 
+        ОБЩАЯ ИНФОРМАЦИЯ в раздел Начальная сумма цен единиц товара, работы, услуги, 
+        берем значение Начальная сумма цен единиц товара, работы, услуги. 
+        Далее, НМЦ тогов делим на значение Начальная сумма цен единиц товара, работы, услуги. Получаем значение Х. 
+        Далее возвращаемся на стр РЕЗУЛЬТАТЫ ОПРЕДЕЛЕНИЯ ПОСТАВЩИКА (ПОДРЯДЧИКА, ИСПОЛНИТЕЛЯ) в раздел 
+        Участники, с которыми планируется заключить контракт - умножаем полученное значение Х на цену каждого участника
+        и получаем суммы Победителя и суммы каждого участника ( в нашей БД их 4, включая Победителя)           
+        """
+
+        html_price = BeautifulSoup(r.text, features="html.parser")
+
+        # НМЦ со страницы
+        tenderprice = html_price.find_all("span", {"class": 'cardMainInfo__content cost'})[0].text.replace(
+            ' ', '').replace(' ', '').replace('₽', '').replace(',', '.').lstrip()
+
+
+        delta = 0.1
+
+        # Разделить полученную цену победителя на НМЦ
+        if price is not None:
+            delta = float(price) / float(tenderprice)
+
+        print(notif_number, 'tenderprice=', float(tenderprice), 'delta=', delta)
+
+        # Если полученный результат не входит в рамки от 0,1 до 1 - определение цены по новому алгоритму
+        if not (0.1 <= delta <= 1):
+            print(notif_number, 'Определение цены по новому алгоритму, delta=' + str(delta) + '. Цена поб. до расчёта=' + str(price))
+
+            # ссылка на общие данные, откуда надо взять "Начальная сумма цен единиц товара, работы, услуги"
+            # url_resultsum = 'https://zakupki.gov.ru/epz/order/notice/ea20/view/common-info.html?regNumber=' + str(notif_number)
+
+            # ссылка на печатную форму, откуда надо взять "Начальная сумма цен единиц товара, работы, услуги"
+            url_resultsum = 'https://zakupki.gov.ru/epz/order/notice/printForm/view.html?regNumber=' + str(notif_number)
+
+            # Берём значение поля "Начальная сумма цен единиц товара, работы, услуги"
+            #resultsum = getresultsum(url_resultsum, headers0, notif_number)
+
+            # Берём значение поля "Начальная сумма цен единиц товара, работы, услуги" из печатной формы
+            resultsum = getresultsum2(url_resultsum, headers0)
+
+            print(notif_number, 'resultsum=', resultsum)
+
+            # 2) - Если несколько победителей
+            if isDouble:
+                # Находим x
+                x = float(tenderprice) / resultsum
+
+                print(notif_number, 'x=', x, 'old_price=', price, 'old_sec_price=', sec_price)
+
+                price = float(price) * x
+                sec_price = float(sec_price) * x
+
+                print(notif_number, 'price=', price, 'sec_price=', sec_price)
+
+            # 1) - Если только 1 победитель
+            else:
+                # Если стоит только одно значение и оно равно значению на странице ОБЩАЯ ИНФОРМАЦИЯ в разделе
+                # Начальная сумма цен единиц товара, работы, услуги, то в Цене побед ставим НМЦ торгов"
+                if int(float(price)) == int(resultsum):
+                    price = float(tenderprice)
+                    print(notif_number, 'price1=', price)
+                else:
+                    # от 25.11.2022: Если не равны
+                    price = (float(tenderprice) / float(resultsum)) * float(price)
+                    print(notif_number, 'price2=', price)
 
         print(z)
-        print(main_stat)
+        print(main_stat, notif_number)
         print(winner)
         print(inn)
+        print('inn,kpp sup: ', inn_sup, kpp_sup)
         print(price)
         print(sec_winner)
         print(inn2)
@@ -528,6 +805,12 @@ def parse_and_load_data(proxy0, time_to_sleep, url0, headers0, notif_number, log
 
     #Загрузка на импорт
     try:
+        # Org_ID=748578, OrgNm='В обработке', если нет ИНН. Когда появится контракт - победитель подставится из него
+        if ident == 1 and inn_sup == None:
+            Winner_Org_ID = 748578
+        else:
+            Winner_Org_ID = None
+
         conn = pyodbc.connect('Driver='+driver_sql+';'
                               'Server='+server_sql+';'
                               'Database=CursorImport;'
@@ -537,20 +820,20 @@ def parse_and_load_data(proxy0, time_to_sleep, url0, headers0, notif_number, log
         cursor = conn.cursor()
         if isDouble == False:
             cursor.execute(
-                "insert into [CursorImport].[dbo].[import_protocols44](notifnr, prot_num, winner, second_org, create_dt, why_not, price, main_stat, INN, KPP)"
-                "values (?, ?, ?, ?, getdate(), ?, ?, ?, ?, ?) ",
-                notif_number, prot_num, winner, sec_winner, z, price, main_stat, inn, kpp
+                "insert into [CursorImport].[dbo].[import_protocols44](notifnr, prot_num, winner, second_org, create_dt, why_not, price, main_stat, INN, KPP, Winner_Org_ID)"
+                "values (?, ?, ?, ?, getdate(), ?, ?, ?, ?, ?, ?) ",
+                notif_number, prot_num, winner, sec_winner, z, price, main_stat, inn, kpp, Winner_Org_ID
             )
         else:
             cursor.execute(
-                "insert into [CursorImport].[dbo].[import_protocols44](notifnr, prot_num, winner, create_dt, why_not, price, main_stat, INN, KPP)"
-                "values (?, ?, ?, getdate(), ?, ?, ?, ?, ?) ",
-                notif_number, 1, winner, z, price, main_stat, inn, kpp
+                "insert into [CursorImport].[dbo].[import_protocols44](notifnr, prot_num, winner, create_dt, why_not, price, main_stat, INN, KPP, Winner_Org_ID)"
+                "values (?, ?, ?, getdate(), ?, ?, ?, ?, ?, ?) ",
+                notif_number, 1, winner, z, price, main_stat, inn, kpp, Winner_Org_ID
             )
             cursor.execute(
-                "insert into [CursorImport].[dbo].[import_protocols44](notifnr, prot_num, second_org, create_dt, why_not, price, main_stat, INN, KPP)"
-                "values (?, ?, ?, getdate(), ?, ?, ?, ?, ?) ",
-                notif_number, 2, sec_winner, z, sec_price, main_stat, inn2, kpp2
+                "insert into [CursorImport].[dbo].[import_protocols44](notifnr, prot_num, second_org, create_dt, why_not, price, main_stat, INN, KPP, Winner_Org_ID)"
+                "values (?, ?, ?, getdate(), ?, ?, ?, ?, ?, ?) ",
+                notif_number, 2, sec_winner, z, sec_price, main_stat, inn2, kpp2, Winner_Org_ID
             )
         conn.commit()
         conn.close()
@@ -583,6 +866,8 @@ def parser_work(chunk):
                         'User-Agent': UserAgent
                         #'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/80.0.3987.163 Safari/537.36'
                     }
+
+                    #print(notif, UserAgent)
 
                     try:
                         if NeedProxy == 'True':
@@ -633,8 +918,71 @@ def GetRandomUserAgent ():
     with open("UserAgent.txt") as file:
         UserAgentAr = [row.strip() for row in file]
 
-    Rand = random.randint(1, len(UserAgentAr))
+    Rand = random.randint(1, len(UserAgentAr)-1)
     return UserAgentAr[Rand]
+
+# STEEL от 17.11.2022 для нахождения цены по новому алгоритму.
+# Забирает поле "Начальная сумма цен единиц товара, работы, услуги" из вкладки "Общая информация"
+def getresultsum (url, headers, notif_number):
+
+    htmlsum = requests.get(url, headers=headers)
+    soup = BeautifulSoup(htmlsum.text, 'html.parser')
+
+    resultsum = soup.find_all("span", {"class": 'cost'})[1].text.replace(' ', '').replace(' ', '').replace('₽', '').replace(',', '.').lstrip()
+    otherpage = soup.find_all("div", {"class": 'd-flex justify-content-between align-items-baseline'})
+
+    if otherpage != []:
+        print(notif_number, 'Несколько страниц на вкладке с Общими данными')
+
+        # <div id="medTable31293846">
+        medTableALL = str(soup.findAll('div', attrs={'id': re.compile("medTable")})[0]).split('<div id="')[1]
+
+        LotId = medTableALL[medTableALL.find('ble') + 3:medTableALL.find('">')]
+        url2 = 'https://zakupki.gov.ru/epz/order/notice/ea20/view/medicinesPage.html?pageNumber=1&recordsPerPage=50&lotId=' + str(LotId) + '&regNumber=' + str(notif_number)
+
+        html2 = requests.get(url2, headers=headers)
+        soup2 = BeautifulSoup(html2.text, 'html.parser')
+
+        resultsum2 = soup2.find_all("span", {"class": 'cost'})[0].text.replace(' ', '').replace(' ', '').replace('₽',
+                                                                             '').replace(',', '.').lstrip()
+
+        if resultsum != resultsum2:
+            resultsum = resultsum2
+
+
+    return float(resultsum)
+
+# STEEL от 22.11.2022 для нахождения цены по новому алгоритму.
+# Забирает поле "Начальная сумма цен единиц товара, работы, услуги" из печатной формы
+def getresultsum2(url, headers):
+
+    # Просмотр через печатную форму
+    # GET https://zakupki.gov.ru/epz/order/notice/printForm/view.html?regNumber=0358300335522000218
+
+    html = requests.get(url, headers=headers)
+    soup = BeautifulSoup(html.text, 'html.parser')
+
+    # <td id="invis" colspan="9" align="right">Начальная сумма цен единиц товара: 443.64 Российский рубль</td>
+    try:
+        resultsum = soup.find_all("td", {"id": 'invis'})[1].text.replace(
+                'Начальная сумма цен единиц товара: ', '').replace(
+                'Итого по лекарственным препаратам: ', '').replace(
+                'Итого:', '').replace(
+                ' ', '').replace(' Российский рубль', '').replace(',', '.').replace(' ', '').lstrip()
+    except:
+
+        # <p align="right">Начальная сумма цен товара, работы, услуги: 90.00 Российский рубль</p>
+        try:
+            resultsum = soup.find_all("p", {"align": 'right'})[1].text.replace(
+                'Начальная сумма цен товара, работы, услуги: ', '').replace(
+                'Итого:', '').replace(
+                ' ', '').replace(' Российский рубль', '').replace(',', '.').replace(' ', '').lstrip()
+        except:
+            resultsum = None
+
+
+    return float(resultsum)
+
 
 
 if __name__ == '__main__':
